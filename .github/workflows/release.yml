@@ -129,8 +129,8 @@ jobs:
 
       - name: Install wkg
         run: |
-          curl -fsSL "https://github.com/bytecodealliance/wasm-pkg-tools/releases/download/v0.10.1/wkg-x86_64-unknown-linux-gnu.tar.gz" \
-            | tar -xz -C /usr/local/bin wkg
+          cargo install cargo-binstall --locked
+          cargo binstall wkg --no-confirm
 
       - name: Verify TinyGo
         run: tinygo version
