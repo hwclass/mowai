@@ -129,8 +129,8 @@ jobs:
 
       - name: Install wkg
         run: |
-          go install github.com/bytecodealliance/wkg-go/cmd/wkg@latest
-          echo "$HOME/go/bin" >> $GITHUB_PATH
+          curl -fsSL "https://github.com/bytecodealliance/wasm-pkg-tools/releases/download/v0.10.1/wkg-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xz -C /usr/local/bin wkg
 
       - name: Verify TinyGo
         run: tinygo version
