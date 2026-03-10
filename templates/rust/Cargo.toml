@@ -10,4 +10,5 @@ crate-type = ["cdylib"]
 wit-bindgen = "0.25"
 
 [package.metadata.component]
-package = "mowai:agent@0.1.0"
+package = "mowai:agent"
+version = "0.1.0"
