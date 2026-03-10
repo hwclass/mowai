@@ -20,11 +20,7 @@ jobs:
         run: npm install -g @bytecodealliance/jco
 
       - name: Install wasm-tools
-        run: |
-          curl -fsSL "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.245.1/wasm-tools-1.245.1-x86_64-unknown-linux-musl.tar.gz" \
-            | tar -xz -C /tmp
-          sudo mv /tmp/wasm-tools-1.245.1-x86_64-unknown-linux-musl/wasm-tools /usr/local/bin/wasm-tools
-          wasm-tools --version
+        uses: bytecodealliance/actions/wasm-tools/setup@v1
 
       - name: Build JS template wasm
         run: |
@@ -75,11 +71,7 @@ jobs:
           cargo install cargo-component --locked
 
       - name: Install wasm-tools
-        run: |
-          curl -fsSL "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.245.1/wasm-tools-1.245.1-x86_64-unknown-linux-musl.tar.gz" \
-            | tar -xz -C /tmp
-          sudo mv /tmp/wasm-tools-1.245.1-x86_64-unknown-linux-musl/wasm-tools /usr/local/bin/wasm-tools
-          wasm-tools --version
+        uses: bytecodealliance/actions/wasm-tools/setup@v1
 
       - name: Build Rust template wasm
         run: |
@@ -132,12 +124,8 @@ jobs:
           echo "$HOME/tinygo/bin" >> $GITHUB_PATH
           rm "tinygo0.34.0.linux-amd64.tar.gz"
 
-      - name: Install wasm-tools + wkg
-        run: |
-          curl -fsSL "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.245.1/wasm-tools-1.245.1-x86_64-unknown-linux-musl.tar.gz" \
-            | tar -xz -C /tmp
-          sudo mv /tmp/wasm-tools-1.245.1-x86_64-unknown-linux-musl/wasm-tools /usr/local/bin/wasm-tools
-          wasm-tools --version
+      - name: Install wasm-tools
+        uses: bytecodealliance/actions/wasm-tools/setup@v1
 
       - name: Verify TinyGo
         run: tinygo version
