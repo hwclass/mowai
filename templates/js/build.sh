@@ -4,7 +4,7 @@
 set -euo pipefail
 mkdir -p dist
 jco componentize agent.js \
-    --wit wit/agent.wit \
+    --wit wit \
     --world-name agent-world \
     --out dist/agent.wasm
 echo "✓ Recompiled dist/agent.wasm"

@@ -127,6 +127,11 @@ jobs:
       - name: Install wasm-tools
         uses: bytecodealliance/actions/wasm-tools/setup@v1
 
+      - name: Install wkg
+        run: |
+          go install go.bytecodealliance.org/cmd/wkg@latest
+          echo "$HOME/go/bin" >> $GITHUB_PATH
+
       - name: Verify TinyGo
         run: tinygo version
 

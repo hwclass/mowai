@@ -6,26 +6,28 @@
  * unless you want to modify the agent logic.
  */
 
-// Imports provided by jco host bindings (generated from wit/agent.wit)
-import { hostLlm, broadcast, nowMs, log, getConfig } from 'mowai:agent/agent-world';
+// Host imports are injected as globals by jco componentize — no import statement needed.
+// Available globals: hostLlm, broadcast, nowMs, log, getConfig
 
 export const onInit = () => {
   log('info', 'JS agent initialised');
 };
 
-export const getInfo = () => ({
-  name: getConfig().name,
-  version: '0.1.0',
-  color: getConfig().color,
-  persona: getConfig().persona,
-});
+export const getInfo = () => {
+  const cfg = getConfig();
+  return {
+    name: cfg.name,
+    version: '0.1.0',
+    color: cfg.color,
+    persona: cfg.persona,
+  };
+};
 
 export const handleTask = (taskDescription) => {
   log('info', `Received task: ${taskDescription}`);
   const prompt =
     `Task for the swarm: ${taskDescription}\n\n` +
     `Respond in character. Be concise (≤ 100 words).`;
-  // host-llm import: host prepends persona system prompt automatically
   const response = hostLlm(prompt);
   broadcast(response);
   return response;
