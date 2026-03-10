@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>mowai — Agent</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: #0a0a0a; color: #ddd; font-family: monospace; }
+    body { display: flex; flex-direction: column; }
+    mowai-status { flex-shrink: 0; }
+    mowai-console { flex: 1; min-height: 0; }
+    mowai-task { flex-shrink: 0; }
+  </style>
+</head>
+<body>
+  <!-- MOWAI_CONFIG -->
+
+  <mowai-status id="status"></mowai-status>
+  <mowai-console id="console"></mowai-console>
+  <mowai-task id="task"></mowai-task>
+
+  <!-- Web Components -->
+  <script type="module" src="/components/mowai-status.mjs"></script>
+  <script type="module" src="/components/mowai-console.mjs"></script>
+  <script type="module" src="/components/mowai-task.mjs"></script>
+
+  <!-- Boot sequence -->
+  <script type="module">
+    import * as wasmHost from '/runtime/wasm-host.mjs';
+    import * as llmHost from '/runtime/llm-host.mjs';
+    import * as arenaClient from '/runtime/arena-client.mjs';
+    import { randomUUID } from 'crypto'; // bundled by jco or polyfilled
+
+    const cfg = window.__mowai_config__;
+    if (!cfg) {
+      document.body.textContent = 'Error: __mowai_config__ not injected. Run: npx mowai dev';
+      throw new Error('Missing __mowai_config__');
+    }
+
+    const statusEl  = document.getElementById('status');
+    const consoleEl = document.getElementById('console');
+    const taskEl    = document.getElementById('task');
+
+    const agentId = crypto.randomUUID();
+    let activeTaskId = null;
+
+    // ── Status updates ──────────────────────────────────────────────────────
+
+    statusEl.setAttribute('persona', cfg.agent.persona);
+    statusEl.setAttribute('ws-state', 'connecting');
+    statusEl.setAttribute('llm-state', 'loading');
+
+    // ── LLM load progress ───────────────────────────────────────────────────
+
+    document.addEventListener('llm-progress', (e) => {
+      statusEl.setAttribute('llm-progress', e.detail.progress);
+    });
+    document.addEventListener('llm-error', (e) => {
+      statusEl.setAttribute('llm-state', 'error');
+      consoleEl.appendEntry({ type: 'log', content: `LLM error: ${e.detail.reason}` });
+    });
+
+    // ── Arena events ────────────────────────────────────────────────────────
+
+    document.addEventListener('arena-connected', (e) => {
+      statusEl.setAttribute('ws-state', 'connected');
+      statusEl.setAttribute('slot', e.detail.slot);
+      consoleEl.appendEntry({ type: 'log', content: `Connected to arena (slot #${e.detail.slot})` });
+    });
+    document.addEventListener('arena-disconnected', () => {
+      statusEl.setAttribute('ws-state', 'disconnected');
+      consoleEl.appendEntry({ type: 'log', content: 'Disconnected from arena — reconnecting…' });
+    });
+
+    // ── Global task handler ─────────────────────────────────────────────────
+
+    document.addEventListener('task', async (e) => {
+      const { taskId, description } = e.detail;
+      activeTaskId = taskId;
+      taskEl.setCurrentTask(description);
+      consoleEl.appendEntry({ type: 'log', content: `Task received: ${description}` });
+      await runTask(taskId, description);
+    });
+
+    taskEl.addEventListener('submit-task', async (e) => {
+      const { description } = e.detail;
+      const taskId = crypto.randomUUID();
+      activeTaskId = taskId;
+      consoleEl.appendEntry({ type: 'log', content: `Local task: ${description}` });
+      await runTask(taskId, description);
+    });
+
+    async function runTask(taskId, description) {
+      const start = Date.now();
+      try {
+        const result = await wasmHost.handleTask(description);
+        arenaClient.sendResponse(taskId, result, Date.now() - start);
+        consoleEl.appendEntry({ type: 'response', content: result });
+      } catch (err) {
+        consoleEl.appendEntry({ type: 'log', content: `Task error: ${err.message}` });
+      }
+    }
+
+    // ── Agent log ───────────────────────────────────────────────────────────
+
+    document.addEventListener('agent-log', (e) => {
+      consoleEl.appendEntry({ type: 'log', content: `[${e.detail.level}] ${e.detail.message}` });
+    });
+
+    // ── SSE live-reload ─────────────────────────────────────────────────────
+
+    const sse = new EventSource('/reload');
+    sse.addEventListener('message', (e) => {
+      if (e.data === 'reload') window.location.reload();
+    });
+
+    // ── Boot ────────────────────────────────────────────────────────────────
+
+    // Arena connects in parallel with LLM load
+    const arenaConnectP = arenaClient.connect(cfg.arenaUrl, {
+      agentId,
+      name: cfg.agent.name,
+      color: cfg.agent.color,
+      persona: cfg.agent.persona,
+      version: '0.1.0',
+    }, async (peerId, thought) => {
+      consoleEl.appendEntry({ type: 'log', content: `Peer ${peerId}: ${thought.slice(0, 80)}` });
+      await wasmHost.onPeerThought(peerId, thought);
+    });
+
+    const llmInitP = llmHost.initialiseEngine(cfg.modelId, cfg.systemPrompt, () => {});
+    llmInitP.then(() => {
+      statusEl.setAttribute('llm-state', 'ready');
+      consoleEl.appendEntry({ type: 'log', content: 'LLM ready' });
+    });
+
+    // Wire llmHost and arenaClient into wasm host
+    wasmHost.setLlmHost(llmHost);
+    wasmHost.setArenaClient(arenaClient);
+
+    // Init wasm host
+    wasmHost.initWasmHost({ wasmPath: cfg.wasmPath, config: cfg }).then(() => {
+      consoleEl.appendEntry({ type: 'log', content: `Agent ${cfg.agent.name} initialised` });
+    }).catch((err) => {
+      consoleEl.appendEntry({ type: 'log', content: `Wasm init error: ${err.message}` });
+    });
+
+    await arenaConnectP.catch((err) => {
+      consoleEl.appendEntry({ type: 'log', content: `Arena connect error: ${err.message}` });
+    });
+  </script>
+</body>
+</html>

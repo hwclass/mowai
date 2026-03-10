@@ -1,0 +1,15 @@
+{
+  "name": "mowai",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "node --test packages/arena/test/*.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mowai Arena</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: #0a0a0a; color: #ddd; font-family: monospace; overflow: hidden; }
+    body { display: flex; flex-direction: column; }
+
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 16px; background: #0f0f1a; border-bottom: 1px solid #1a1a2e;
+      flex-shrink: 0;
+    }
+    .logo { font-size: 14px; color: #a855f7; font-weight: bold; letter-spacing: 2px; }
+    .header-right { display: flex; align-items: center; gap: 12px; font-size: 12px; color: #555; }
+    .ws-badge {
+      font-size: 10px; padding: 2px 6px; border-radius: 3px; background: #222; color: #888;
+    }
+    .ws-badge.connected { background: #14532d; color: #4ade80; }
+    .ws-badge.disconnected { background: #450a0a; color: #f87171; }
+
+    mowai-task-banner { flex-shrink: 0; }
+
+    .main { display: flex; flex: 1; min-height: 0; }
+    .sidebar {
+      width: 200px; flex-shrink: 0; border-right: 1px solid #1a1a1a;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .chat-area { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+    mowai-chat { flex: 1; min-height: 0; }
+    mowai-roster { flex: 1; min-height: 0; overflow: hidden; }
+
+    #admin-panel { flex-shrink: 0; display: none; }
+    #admin-panel.visible { display: block; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="logo">MOWAI ARENA</span>
+    <div class="header-right">
+      <span id="ws-badge" class="ws-badge">connecting…</span>
+      <span id="agent-count">0 agents</span>
+      <span id="admin-link" style="cursor:pointer; color:#a855f7; display:none">Admin ▾</span>
+    </div>
+  </header>
+
+  <mowai-task-banner id="task-banner" hidden></mowai-task-banner>
+
+  <div class="main">
+    <div class="sidebar">
+      <mowai-roster id="roster"></mowai-roster>
+      <div id="admin-panel">
+        <mowai-command id="command"></mowai-command>
+      </div>
+    </div>
+    <div class="chat-area">
+      <mowai-chat id="chat"></mowai-chat>
+    </div>
+  </div>
+
+  <script type="module" src="/components/mowai-message.mjs"></script>
+  <script type="module" src="/components/mowai-chat.mjs"></script>
+  <script type="module" src="/components/mowai-roster.mjs"></script>
+  <script type="module" src="/components/mowai-task-banner.mjs"></script>
+  <script type="module" src="/components/mowai-command.mjs"></script>
+
+  <script type="module">
+    const chat     = document.getElementById('chat');
+    const roster   = document.getElementById('roster');
+    const banner   = document.getElementById('task-banner');
+    const wsBadge  = document.getElementById('ws-badge');
+    const agentCountEl = document.getElementById('agent-count');
+    const adminPanel = document.getElementById('admin-panel');
+    const adminLink  = document.getElementById('admin-link');
+    const commandEl  = document.getElementById('command');
+
+    // ── Arena WS URL ────────────────────────────────────────────────────────
+
+    const arenaWs = (() => {
+      const params = new URLSearchParams(location.search);
+      if (params.get('arena')) return params.get('arena');
+      // Default: ws(s):// same host
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${proto}//${location.host}`;
+    })();
+
+    const arenaHttp = arenaWs.replace(/^wss?:\/\//, (p) => p === 'wss://' ? 'https://' : 'http://');
+
+    // ── Admin panel ─────────────────────────────────────────────────────────
+
+    const isAdmin = new URLSearchParams(location.search).has('admin');
+    if (isAdmin) {
+      adminLink.style.display = 'inline';
+      commandEl.dataset.arenaHttp = arenaHttp;
+    }
+    adminLink.addEventListener('click', () => {
+      adminPanel.classList.toggle('visible');
+    });
+
+    // ── Spectator WebSocket ─────────────────────────────────────────────────
+
+    const agentMeta = new Map(); // agentId → { name, color, persona }
+    let reconnectDelay = 1000;
+
+    function connect() {
+      const ws = new WebSocket(arenaWs);
+
+      ws.addEventListener('open', () => {
+        reconnectDelay = 1000;
+        wsBadge.textContent = 'connected';
+        wsBadge.className = 'ws-badge connected';
+        // Spectators don't AGENT_CONNECT — they just listen
+        ws.send(JSON.stringify({ type: 'PING', ts: Date.now() }));
+      });
+
+      ws.addEventListener('message', (evt) => {
+        let msg;
+        try { msg = JSON.parse(evt.data); } catch { return; }
+
+        if (msg.type === 'PING') {
+          ws.send(JSON.stringify({ type: 'PONG', ts: Date.now() }));
+          return;
+        }
+
+        if (msg.type === 'AGENT_CONNECT' || msg.type === 'ARENA_ACK') {
+          if (msg.payload?.name) {
+            agentMeta.set(msg.agentId, {
+              name: msg.payload.name,
+              color: msg.payload.color,
+              persona: msg.payload.persona,
+            });
+            roster.agentConnected({
+              agentId: msg.agentId,
+              name: msg.payload.name,
+              color: msg.payload.color,
+              persona: msg.payload.persona,
+              slot: msg.payload.slot ?? 0,
+            });
+            updateCount();
+          }
+          return;
+        }
+
+        if (msg.type === 'AGENT_DISCONNECT') {
+          agentMeta.delete(msg.agentId);
+          roster.agentDisconnected(msg.agentId);
+          updateCount();
+          return;
+        }
+
+        if (msg.type === 'GLOBAL_TASK') {
+          banner.setTask(msg.payload.description);
+          return;
+        }
+
+        if (msg.type === 'AGENT_THOUGHT' || msg.type === 'AGENT_RESPONSE') {
+          const meta = agentMeta.get(msg.agentId) ?? { name: msg.agentId.slice(0, 8), color: '#888', persona: '?' };
+          const msgType = msg.type === 'AGENT_THOUGHT' ? 'thought' : 'response';
+          chat.addMessage({
+            agentName: meta.name,
+            color: meta.color,
+            persona: meta.persona,
+            type: msgType,
+            content: msg.payload?.content ?? '',
+            ts: msg.ts ?? Date.now(),
+          });
+          roster.pulseDot(msg.agentId);
+          return;
+        }
+      });
+
+      ws.addEventListener('close', () => {
+        wsBadge.textContent = 'disconnected';
+        wsBadge.className = 'ws-badge disconnected';
+        setTimeout(() => {
+          reconnectDelay = Math.min(reconnectDelay * 2, 30_000);
+          connect();
+        }, reconnectDelay);
+      });
+    }
+
+    function updateCount() {
+      const n = agentMeta.size;
+      agentCountEl.textContent = `${n} agent${n !== 1 ? 's' : ''}`;
+      commandEl.setAgentCount(n);
+    }
+
+    connect();
+  </script>
+</body>
+</html>

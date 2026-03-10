@@ -1,0 +1,29 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run arena unit + integration tests
+        run: node --test --test-timeout=15000 packages/arena/test/*.mjs
+
+      - name: Validate WIT interface
+        run: |
+          curl -fsSL https://github.com/bytecodealliance/wasm-tools/releases/latest/download/wasm-tools-x86_64-unknown-linux-musl.tar.gz \
+            | tar -xz -C /usr/local/bin --strip-components=1
+          wasm-tools component wit wit/agent.wit

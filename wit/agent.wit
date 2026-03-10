@@ -1,0 +1,65 @@
+package mowai:agent@0.1.0;
+
+world agent-world {
+    /// Runtime config injected by the host from mowai.config.json.
+    /// Returned by the get-config import — never baked into the binary.
+    record agent-config {
+        /// Display name shown in Arena chat (max 32 chars)
+        name: string,
+        /// CSS hex colour for Arena chat badge e.g. "#a855f7"
+        color: string,
+        /// Active persona name e.g. "contrarian" (max 32 chars)
+        persona: string,
+    }
+
+    /// Static identity returned by get-info.
+    /// name and color come from mowai.config.json, not from recompiling.
+    record agent-info {
+        /// Display name shown in Arena chat (max 32 chars)
+        name: string,
+        /// Semver string e.g. "0.1.0"
+        version: string,
+        /// CSS hex colour for Arena chat badge e.g. "#a855f7"
+        color: string,
+        /// Active persona name e.g. "contrarian" (max 32 chars)
+        persona: string,
+    }
+
+    // ── Imports: host capabilities available to the agent ─────────────────
+
+    /// Request a completion from the local LLM.
+    /// The host prepends the active persona system prompt before forwarding.
+    /// Synchronous from agent perspective; host uses Atomics + SharedArrayBuffer
+    /// to bridge the async WebLLM call back into the sync Wasm execution context.
+    import host-llm: func(prompt: string) -> string;
+
+    /// Emit a message into the swarm (routed to Arena chat by relay).
+    /// Content should be a plain string; host wraps in SwarmMessage envelope.
+    import broadcast: func(message: string);
+
+    /// Unix timestamp in milliseconds.
+    import now-ms: func() -> u64;
+
+    /// Emit a log line visible only in participant UI console (not relayed).
+    import log: func(level: string, message: string);
+
+    /// Returns runtime config (name, color, persona) injected from mowai.config.json.
+    /// Called by the wasm at startup so identity is never baked into the binary.
+    import get-config: func() -> agent-config;
+
+    // ── Exports: functions the host invokes on the agent ──────────────────
+
+    /// Primary task handler. Called when a GLOBAL_TASK arrives from Arena
+    /// or when participant triggers a local task from the UI.
+    export handle-task: func(task-description: string) -> string;
+
+    /// Identity probe. Called on startup and for Arena roster display.
+    export get-info: func() -> agent-info;
+
+    /// Lifecycle hook: called once after Wasm instantiation.
+    export on-init: func();
+
+    /// Called when a peer agent's thought is relayed back.
+    /// Enables reactive swarm behaviour (agents responding to each other).
+    export on-peer-thought: func(peer-id: string, thought: string);
+}

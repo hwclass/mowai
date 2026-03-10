@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.wasm
+*.tar.gz
+.env
+
+# Claude / coding agent
+.claude/
+CLAUDE.md
+compile.prompt.md
+spec.md
+tasks.md
+lessons-learned.md

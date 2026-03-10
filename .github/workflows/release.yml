@@ -1,0 +1,200 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-js:
+    runs-on: ubuntu-latest
+    outputs:
+      sha256-js: ${{ steps.checksum.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install jco
+        run: npm install -g @bytecodealliance/jco
+      - name: Build JS template wasm
+        run: |
+          cd templates/js
+          mkdir -p dist
+          jco componentize agent.js \
+            --wit wit/agent.wit \
+            --world-name agent-world \
+            --out dist/agent.wasm
+      - name: Validate
+        run: |
+          curl -fsSL https://github.com/bytecodealliance/wasm-tools/releases/latest/download/wasm-tools-x86_64-unknown-linux-musl.tar.gz \
+            | tar -xz -C /usr/local/bin --strip-components=1
+          wasm-tools validate templates/js/dist/agent.wasm
+      - name: Assemble tarball
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          mkdir -p release-artifacts
+          tar czf release-artifacts/js-${TAG}.tar.gz \
+            -C templates/js \
+            agent.js package.json mowai.config.json \
+            wit/ personas/ dist/ \
+            setup.sh build.sh Dockerfile README.md
+      - name: Compute checksum
+        id: checksum
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          SHA=$(sha256sum release-artifacts/js-${TAG}.tar.gz | cut -d' ' -f1)
+          echo "sha256=$SHA" >> $GITHUB_OUTPUT
+          echo "$SHA  js-${TAG}.tar.gz" > release-artifacts/js-${TAG}.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: js-template
+          path: release-artifacts/
+
+  build-rust:
+    runs-on: ubuntu-latest
+    outputs:
+      sha256-rust: ${{ steps.checksum.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cargo-component + wasm-tools
+        run: |
+          rustup target add wasm32-wasip1
+          cargo install cargo-component --locked
+          curl -fsSL https://github.com/bytecodealliance/wasm-tools/releases/latest/download/wasm-tools-x86_64-unknown-linux-musl.tar.gz \
+            | tar -xz -C /usr/local/bin --strip-components=1
+      - name: Build Rust template wasm
+        run: |
+          cd templates/rust
+          mkdir -p dist
+          cargo component build --release
+          cp target/wasm32-wasip1/release/mowai_agent.wasm dist/agent.wasm
+      - name: Validate
+        run: wasm-tools validate templates/rust/dist/agent.wasm
+      - name: Assemble tarball
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          mkdir -p release-artifacts
+          tar czf release-artifacts/rust-${TAG}.tar.gz \
+            -C templates/rust \
+            src/ Cargo.toml mowai.config.json \
+            wit/ personas/ dist/ \
+            setup.sh build.sh Dockerfile README.md
+      - name: Compute checksum
+        id: checksum
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          SHA=$(sha256sum release-artifacts/rust-${TAG}.tar.gz | cut -d' ' -f1)
+          echo "sha256=$SHA" >> $GITHUB_OUTPUT
+          echo "$SHA  rust-${TAG}.tar.gz" > release-artifacts/rust-${TAG}.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-template
+          path: release-artifacts/
+
+  build-go:
+    runs-on: ubuntu-latest
+    outputs:
+      sha256-go: ${{ steps.checksum.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Install TinyGo + wasm-tools + wkg
+        run: |
+          wget -q https://github.com/tinygo-org/tinygo/releases/download/v0.34.0/tinygo0.34.0.linux-amd64.tar.gz
+          tar -xf tinygo0.34.0.linux-amd64.tar.gz -C /usr/local
+          echo "/usr/local/tinygo/bin" >> $GITHUB_PATH
+          go install go.bytecodealliance.org/cmd/wkg@latest
+          curl -fsSL https://github.com/bytecodealliance/wasm-tools/releases/latest/download/wasm-tools-x86_64-unknown-linux-musl.tar.gz \
+            | tar -xz -C /usr/local/bin --strip-components=1
+      - name: Build Go template wasm
+        run: |
+          cd templates/go
+          go generate ./...
+          wkg wit build
+          mkdir -p dist
+          tinygo build \
+            -target=wasip2 \
+            -no-debug \
+            --wit-package mowai:agent@0.1.0.wasm \
+            --wit-world agent-world \
+            -o dist/agent.wasm \
+            main.go
+      - name: Validate
+        run: wasm-tools validate templates/go/dist/agent.wasm
+      - name: Assemble tarball
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          mkdir -p release-artifacts
+          tar czf release-artifacts/go-${TAG}.tar.gz \
+            -C templates/go \
+            main.go tools.go go.mod mowai.config.json \
+            wit/ personas/ dist/ \
+            setup.sh build.sh Dockerfile README.md
+      - name: Compute checksum
+        id: checksum
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          SHA=$(sha256sum release-artifacts/go-${TAG}.tar.gz | cut -d' ' -f1)
+          echo "sha256=$SHA" >> $GITHUB_OUTPUT
+          echo "$SHA  go-${TAG}.tar.gz" > release-artifacts/go-${TAG}.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: go-template
+          path: release-artifacts/
+
+  publish:
+    needs: [build-js, build-rust, build-go]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts/
+          merge-multiple: true
+
+      - name: Generate manifest.json
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          CDN_BASE="https://cdn.mowai.dev/releases/${TAG}"
+          cat > release-artifacts/manifest.json <<EOF
+          {
+            "version": "${TAG}",
+            "templates": {
+              "js":   { "url": "${CDN_BASE}/js-${TAG}.tar.gz",   "sha256": "${{ needs.build-js.outputs.sha256-js }}" },
+              "rust": { "url": "${CDN_BASE}/rust-${TAG}.tar.gz", "sha256": "${{ needs.build-rust.outputs.sha256-rust }}" },
+              "go":   { "url": "${CDN_BASE}/go-${TAG}.tar.gz",   "sha256": "${{ needs.build-go.outputs.sha256-go }}" }
+            }
+          }
+          EOF
+
+      - name: Upload to R2
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          pip install awscli
+          aws configure set aws_access_key_id "$R2_ACCESS_KEY_ID"
+          aws configure set aws_secret_access_key "$R2_SECRET_ACCESS_KEY"
+          aws configure set region auto
+          R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 cp release-artifacts/ \
+            "s3://${R2_BUCKET}/releases/${TAG}/" \
+            --recursive \
+            --endpoint-url "$R2_ENDPOINT"
+          # Update latest pointer
+          aws s3 cp release-artifacts/manifest.json \
+            "s3://${R2_BUCKET}/latest/manifest.json" \
+            --endpoint-url "$R2_ENDPOINT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/*
+          generate_release_notes: true

@@ -1,0 +1,13 @@
+{
+  "name": "@mowai/arena",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/server.mjs",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test test/*.mjs"
+  },
+  "dependencies": {
+    "ws": "^8"
+  }
+}
