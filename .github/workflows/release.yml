@@ -136,6 +136,8 @@ jobs:
         run: tinygo version
 
       - name: Build Go template wasm
+        env:
+          GOFLAGS: "-mod=mod"
         run: |
           cd templates/go
           go generate ./...
