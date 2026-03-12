@@ -181,6 +181,8 @@ jobs:
   publish:
     needs: [build-js, build-rust]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -188,41 +190,6 @@ jobs:
         with:
           path: release-artifacts/
           merge-multiple: true
-
-      - name: Generate manifest.json
-        run: |
-          TAG=${GITHUB_REF_NAME}
-          CDN_BASE="https://cdn.mowai.dev/releases/${TAG}"
-          cat > release-artifacts/manifest.json <<EOF
-          {
-            "version": "${TAG}",
-            "templates": {
-              "js":   { "url": "${CDN_BASE}/js-${TAG}.tar.gz",   "sha256": "${{ needs.build-js.outputs.sha256-js }}" },
-              "rust": { "url": "${CDN_BASE}/rust-${TAG}.tar.gz", "sha256": "${{ needs.build-rust.outputs.sha256-rust }}" }
-            }
-          }
-          EOF
-
-      - name: Upload to R2
-        env:
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET: ${{ secrets.R2_BUCKET }}
-        run: |
-          TAG=${GITHUB_REF_NAME}
-          pip install awscli --quiet
-          aws configure set aws_access_key_id "$R2_ACCESS_KEY_ID"
-          aws configure set aws_secret_access_key "$R2_SECRET_ACCESS_KEY"
-          aws configure set region auto
-          R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          aws s3 cp release-artifacts/ \
-            "s3://${R2_BUCKET}/releases/${TAG}/" \
-            --recursive \
-            --endpoint-url "$R2_ENDPOINT"
-          aws s3 cp release-artifacts/manifest.json \
-            "s3://${R2_BUCKET}/latest/manifest.json" \
-            --endpoint-url "$R2_ENDPOINT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

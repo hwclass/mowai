@@ -11,30 +11,41 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 
-import { fetchJson, downloadFile } from '../shell/net.mjs';
+import { fetchJson, fetchText, downloadFile } from '../shell/net.mjs';
 import { extractTarGz, writeJson } from '../shell/fs.mjs';
 import { randomAgentName, randomColor } from '../namegen.mjs';
 import { spinner } from '../spinner.mjs';
 import { green, bold, dim, yellow, cyan } from '../ansi.mjs';
 
-const CDN_BASE = process.env.MOWAI_CDN ?? 'https://cdn.mowai.dev';
+const GITHUB_REPO = process.env.MOWAI_GITHUB_REPO ?? 'hwclass/mowai';
 const VALID_LANGS = new Set(['rust', 'go', 'js']);
 
 // ── Functional core ───────────────────────────────────────────────────────────
 
 /**
- * Fetch the release manifest and return the tarball URL + checksum for a lang.
+ * Resolve the tarball URL + checksum for a language template from GitHub Releases.
  *
  * @param {string} lang
- * @param {string} [version]  defaults to 'latest'
+ * @param {string} [version]  tag name e.g. 'v0.1.0'; defaults to latest release
  * @returns {Promise<{ url: string, sha256: string, version: string }>}
  */
 export async function resolveRelease(lang, version) {
-  const tag = version ?? 'latest';
-  const manifest = await fetchJson(`${CDN_BASE}/${tag}/manifest.json`);
-  const entry = manifest.templates?.[lang];
-  if (!entry) throw new Error(`No template for language "${lang}" in manifest`);
-  return { url: entry.url, sha256: entry.sha256, version: manifest.version };
+  const apiUrl = version
+    ? `https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${version}`
+    : `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
+  const release = await fetchJson(apiUrl);
+  const tag = release.tag_name;
+  const tarballName = `${lang}-${tag}.tar.gz`;
+  const checksumName = `${lang}-${tag}.tar.gz.sha256`;
+  const tarballAsset = release.assets?.find((a) => a.name === tarballName);
+  const checksumAsset = release.assets?.find((a) => a.name === checksumName);
+  if (!tarballAsset) throw new Error(`No "${lang}" template in release ${tag}`);
+  let sha256 = '';
+  if (checksumAsset) {
+    const raw = await fetchText(checksumAsset.browser_download_url);
+    sha256 = raw.trim().split(/\s/)[0];
+  }
+  return { url: tarballAsset.browser_download_url, sha256, version: tag };
 }
 
 /**
