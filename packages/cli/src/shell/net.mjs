@@ -52,6 +52,31 @@ export function downloadFile(url, destPath, onProgress) {
 }
 
 /**
+ * Fetch a URL and return the raw response body as a string.
+ *
+ * @param {string} url
+ * @returns {Promise<string>}
+ */
+export function fetchText(url) {
+  return new Promise((resolve, reject) => {
+    const get = url.startsWith('https') ? httpsGet : httpGet;
+    get(url, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        resolve(fetchText(res.headers.location));
+        return;
+      }
+      if (res.statusCode !== 200) {
+        reject(new Error(`HTTP ${res.statusCode} fetching ${url}`));
+        return;
+      }
+      let body = '';
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => resolve(body));
+    }).on('error', reject);
+  });
+}
+
+/**
  * Fetch a URL and return parsed JSON.
  *
  * @param {string} url
