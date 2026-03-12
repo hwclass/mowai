@@ -107,6 +107,7 @@ jobs:
           path: release-artifacts/
 
   build-go:
+    if: false  # temporarily disabled — Go toolchain issues; re-enable once fixed
     runs-on: ubuntu-latest
     outputs:
       sha256-go: ${{ steps.checksum.outputs.sha256 }}
@@ -178,7 +179,7 @@ jobs:
           path: release-artifacts/
 
   publish:
-    needs: [build-js, build-rust, build-go]
+    needs: [build-js, build-rust]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -197,8 +198,7 @@ jobs:
             "version": "${TAG}",
             "templates": {
               "js":   { "url": "${CDN_BASE}/js-${TAG}.tar.gz",   "sha256": "${{ needs.build-js.outputs.sha256-js }}" },
-              "rust": { "url": "${CDN_BASE}/rust-${TAG}.tar.gz", "sha256": "${{ needs.build-rust.outputs.sha256-rust }}" },
-              "go":   { "url": "${CDN_BASE}/go-${TAG}.tar.gz",   "sha256": "${{ needs.build-go.outputs.sha256-go }}" }
+              "rust": { "url": "${CDN_BASE}/rust-${TAG}.tar.gz", "sha256": "${{ needs.build-rust.outputs.sha256-rust }}" }
             }
           }
           EOF
